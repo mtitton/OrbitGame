@@ -180,7 +180,7 @@ Encontrou algum problema ou quer enviar uma sugestão?
 <p align="center">
   <img src="docs/images/home.png" width="220">
   <img src="docs/images/gameplay.png" width="220">
-  <img src="docs/images/daily.png" width="220">
+  <img src="docs/images/themes.png" width="220">
 </p>
 
 ---
