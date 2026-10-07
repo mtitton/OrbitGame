@@ -1,71 +1,243 @@
-# OrbitGame — V6.3.1
+# 🪐 Orbit Game
 
-Versão consolidada do Orbit com Game Center preparado para o App Store Connect usando os identificadores definitivos do projeto.
+<p align="center">
+  <strong>Um toque. Duas órbitas. Até onde você consegue chegar?</strong>
+</p>
 
-## Identificadores definitivos
+<p align="center">
+  Um arcade minimalista para iPhone, feito em Swift + SpriteKit, com partidas rápidas, dificuldade progressiva e foco em reflexo e precisão.
+</p>
 
-- Bundle ID: `com.marcustitton.orbitgame`
-- Leaderboard Melhor Score: `com.marcustitton.orbitgame.leaderboard.best`
-- Leaderboard Daily Orbit: `com.marcustitton.orbitgame.leaderboard.daily`
+---
 
-Achievements previstos:
+## 🎮 Sobre o jogo
 
-- `com.marcustitton.orbitgame.achievement.first_orbit`
-- `com.marcustitton.orbitgame.achievement.getting_serious`
-- `com.marcustitton.orbitgame.achievement.orbit_master`
-- `com.marcustitton.orbitgame.achievement.untouchable`
-- `com.marcustitton.orbitgame.achievement.combo_master`
-- `com.marcustitton.orbitgame.achievement.addicted`
+**Orbit** é um jogo casual de controle com apenas um toque.
 
-## O que mudou na V6.3.1
+A mecânica é simples:
 
-- Bundle ID alterado para `com.marcustitton.orbitgame` em Debug e Release.
-- Build number atualizado para 7.
-- IDs do Game Center atualizados para os IDs definitivos criados no App Store Connect.
-- Removida a dependência do `GKAccessPoint.trigger(leaderboardID:...)`, que exige disponibilidade mais recente.
-- O ranking agora é apresentado com `GKGameCenterViewController`, compatível com o deployment target iOS 17.
-- Fluxo de login + abertura de ranking refeito: após autenticar, o app aguarda a tela de login ser realmente dispensada antes de abrir o leaderboard.
-- O rodapé da Home é reconstruído do zero sempre que volta a ficar visível, evitando o desaparecimento isolado de `RANKING`.
-- `RANKING` ganhou uma linha própria, acima de `MISSÕES / TEMAS / STATS`, afastada da home indicator.
-- Ao fechar o Game Center, a Home força a reconstrução do rodapé.
-- Daily Orbit e missões diárias agora usam o dia em UTC, alinhando a sequência diária entre jogadores no mundo todo e com o leaderboard recorrente da Apple.
+- a esfera gira continuamente;
+- um toque alterna entre a órbita interna e a externa;
+- o objetivo é desviar dos obstáculos;
+- quanto mais tempo você sobrevive, mais rápido e imprevisível o jogo fica.
 
-## Game Center no App Store Connect
+A ideia é manter o ciclo o mais direto possível:
 
-Os dois leaderboards precisam existir com estes IDs:
+> abrir → jogar → perder → tentar novamente
 
-1. Classic leaderboard
-   - Reference Name: Orbit Best Score
-   - ID: `com.marcustitton.orbitgame.leaderboard.best`
-   - Integer / Best Score / High to Low
+Sem controles complexos, sem tutoriais longos e sem depender de assets gráficos dentro do gameplay.
 
-2. Recurring leaderboard
-   - Reference Name: Daily Orbit
-   - ID: `com.marcustitton.orbitgame.leaderboard.daily`
-   - Integer / Best Score / High to Low
-   - recorrência diária
+---
 
-Na primeira submissão com Game Center, associe os componentes à mesma versão do app no App Store Connect antes de enviar para revisão.
+## ✨ Recursos
 
-## Teste recomendado
+### Gameplay
 
-1. Abra o app.
-2. Toque em `RANKING`.
-3. Se necessário, faça login no Game Center.
-4. O leaderboard deve abrir automaticamente após o login.
-5. Feche o Game Center e toque em `RANKING` novamente — deve abrir direto.
-6. Feche completamente o Orbit, abra novamente e confirme que `RANKING` continua visível.
-7. Faça uma partida no modo Normal e valide o envio do melhor score.
-8. Faça uma partida no Daily Orbit e valide o score no leaderboard diário quando o componente estiver disponível para a build.
+- Controle com **um único toque**
+- Duas órbitas
+- Obstáculos procedurais
+- Dificuldade progressiva
+- Sequências de obstáculos
+- Obstáculos com diferentes comportamentos
+- Sistema de **Combo**
+- Sistema de **Near Miss**
+- Feedback háptico
+- Partículas e efeitos visuais
+- Screen shake
+- Restart instantâneo
 
-## Observação sobre achievements
+### Daily Orbit
 
-O código mantém a lógica de achievements preparada, mas eles podem ser criados no App Store Connect em uma etapa posterior. Caso ainda não existam, a falha de envio de achievement não interfere nos leaderboards nem no gameplay.
+Um desafio diário com:
 
+- sequência determinística baseada no dia;
+- mesma configuração diária para todos os jogadores;
+- **3 tentativas por dia**;
+- melhor pontuação diária separada do modo normal;
+- leaderboard próprio no Game Center.
 
-## V6.3.1 — Home layout polish
-- Footer split into four independent vertical rows.
-- Safe-area-aware positioning for Missions / Themes / Stats.
-- Normal/Daily selector no longer overlaps the start instruction.
-- Ranking remains on its own row.
-- Compact-height iPhones lift the orbit slightly to preserve spacing.
+### Missões
+
+Missões diárias envolvendo, por exemplo:
+
+- atingir determinada pontuação;
+- realizar Near Misses;
+- alcançar combos;
+- sobreviver por determinado tempo;
+- completar partidas.
+
+### Temas
+
+Temas visuais desbloqueáveis por desempenho:
+
+- Classic
+- Neon
+- Solar
+- Ice
+- Matrix
+- Void
+
+Sem moedas, gems ou sistema de compra interno.
+
+### Estatísticas
+
+O jogo acompanha localmente:
+
+- melhor pontuação;
+- total de partidas;
+- pontos acumulados;
+- Near Misses;
+- maior combo;
+- maior duração de partida.
+
+---
+
+## 🏆 Game Center
+
+Orbit possui integração com o **Apple Game Center**.
+
+### Leaderboards
+
+- **Orbit Best Score**  
+  Ranking global do modo Normal.
+
+- **Daily Orbit**  
+  Ranking do desafio diário.
+
+### Achievements planejados
+
+- First Orbit
+- Getting Serious
+- Orbit Master
+- Untouchable
+- Combo Master
+- Addicted
+
+---
+
+## 🛠 Tecnologias
+
+- **Swift**
+- **SpriteKit**
+- **SwiftUI**
+- **GameKit / Game Center**
+- **UserDefaults**
+- APIs nativas de feedback háptico do iOS
+
+O gameplay é desenhado programaticamente com SpriteKit.
+
+Não há dependências externas para a lógica principal do jogo.
+
+---
+
+## 📱 Requisitos
+
+- iOS 17+
+- iPhone
+- Orientação: Portrait
+
+---
+
+## 🎨 Direção visual
+
+Orbit segue uma estética minimalista baseada em:
+
+- fundo escuro;
+- órbitas geométricas;
+- tipografia limpa;
+- partículas;
+- glow;
+- pequenos acentos de cor.
+
+O objetivo é manter a interface visualmente simples e deixar o movimento do jogo ser o principal elemento da tela.
+
+---
+
+## 🔐 Privacidade
+
+Orbit não possui conta própria, anúncios ou analytics de terceiros na versão atual.
+
+Informações de gameplay, como estatísticas, progresso e temas desbloqueados, são armazenadas localmente no dispositivo.
+
+Recursos de ranking utilizam o **Apple Game Center**.
+
+📄 [Política de Privacidade](https://mtitton.github.io/OrbitGame/privacy.html)
+
+---
+
+## 🆘 Suporte
+
+Encontrou algum problema ou quer enviar uma sugestão?
+
+📧 **mvtitton@gmail.com**
+
+🌐 [Página de suporte](https://mtitton.github.io/OrbitGame/support.html)
+
+---
+
+## 📸 Screenshots
+
+<p align="center">
+  <img src="docs/images/home.png" width="220">
+  <img src="docs/images/gameplay.png" width="220">
+  <img src="docs/images/daily.png" width="220">
+</p>
+
+---
+
+## 🚀 Status
+
+Primeira versão preparada para distribuição pela App Store.
+
+Recursos atuais:
+
+- [x] Gameplay infinito
+- [x] Daily Orbit
+- [x] Missões diárias
+- [x] Temas desbloqueáveis
+- [x] Estatísticas
+- [x] Game Center
+- [x] Leaderboard global
+- [x] Leaderboard diário
+- [x] Compartilhamento de score
+- [x] Suporte e política de privacidade
+- [ ] Achievements no Game Center
+- [ ] Novos eventos procedurais
+- [ ] Mais temas
+- [ ] Áudio final
+- [ ] Novos modos de jogo
+
+---
+
+## 🧭 Roadmap
+
+Algumas ideias para próximas versões:
+
+- Achievements pelo Game Center
+- Mais variedade procedural durante as partidas
+- Novos temas visuais
+- Sons próprios para troca de órbita, combo e Near Miss
+- Novos desafios diários
+- Melhorias de acessibilidade
+- Novas estatísticas
+- Eventos especiais durante partidas longas
+
+---
+
+## 🪪 Identificação do app
+
+**Nome:** Orbit Game  
+**Bundle ID:** `com.marcustitton.orbitgame`
+
+---
+
+## 👤 Autor
+
+Desenvolvido por **Marcus Titton**.
+
+---
+
+<p align="center">
+  <strong>ORBIT</strong><br>
+  Um toque. Duas órbitas.
+</p>
