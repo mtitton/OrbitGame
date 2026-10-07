@@ -17,6 +17,7 @@ final class GameScene: SKScene {
         case missions
         case themes
         case stats
+        case settings
     }
 
     private enum ObstacleKind {
@@ -24,6 +25,14 @@ final class GameScene: SKScene {
         case wide
         case fast
         case drifting
+        case pulse
+        case phase
+    }
+
+    private enum FlowEvent {
+        case none
+        case surge
+        case calm
     }
 
     private enum ThemeID: String, CaseIterable {
@@ -168,6 +177,22 @@ final class GameScene: SKScene {
                 collisionAngle = 0.12
                 speedMultiplier = 0.95
                 oscillationAmplitude = 0.18
+
+            case .pulse:
+                width = 50
+                height = 11
+                glow = 6
+                collisionAngle = 0.115
+                speedMultiplier = 1.08
+                oscillationAmplitude = 0
+
+            case .phase:
+                width = 44
+                height = 10
+                glow = 5
+                collisionAngle = 0.105
+                speedMultiplier = 1.22
+                oscillationAmplitude = 0
             }
 
             baseAngularVelocity = angularVelocity * speedMultiplier
@@ -206,6 +231,8 @@ final class GameScene: SKScene {
         static let totalNearMisses = "orbit.stats.totalNearMisses"
         static let bestCombo = "orbit.stats.bestCombo"
         static let longestRun = "orbit.stats.longestRun"
+        static let soundEnabled = "orbit.settings.soundEnabled"
+        static let hapticsEnabled = "orbit.settings.hapticsEnabled"
 
         static let dailyDay = "orbit.daily.day"
         static let dailyAttempts = "orbit.daily.attempts"
@@ -248,6 +275,7 @@ final class GameScene: SKScene {
     private let themesSummaryLabel = SKLabelNode(fontNamed: "AvenirNext-Medium")
     private let rankingSummaryLabel = SKLabelNode(fontNamed: "AvenirNext-Medium")
     private let statsSummaryLabel = SKLabelNode(fontNamed: "AvenirNext-Medium")
+    private let settingsSummaryLabel = SKLabelNode(fontNamed: "AvenirNext-Medium")
 
     // MARK: - Game state
 
@@ -279,13 +307,19 @@ final class GameScene: SKScene {
     private var switchCooldown: TimeInterval = 0
     private var trailTimer: TimeInterval = 0
     private var slowMotionTimer: TimeInterval = 0
+    private var activeFlowEvent: FlowEvent = .none
+    private var flowEventTimer: TimeInterval = 0
+    private var nextFlowEventAt: TimeInterval = 13
 
     private var obstacles: [OrbitObstacle] = []
     private var pendingSpawns: [PendingSpawn] = []
     private var dailyGenerator = SeededGenerator(seed: 1)
+    private var dailyFlowGenerator = SeededGenerator(seed: 2)
 
     private var selectedThemeID: ThemeID
     private var themeHitRects: [(ThemeID, CGRect)] = []
+    private var soundSettingRect: CGRect = .zero
+    private var hapticsSettingRect: CGRect = .zero
 
 #if !targetEnvironment(simulator)
     private let impactGenerator = UIImpactFeedbackGenerator(style: .light)
@@ -297,6 +331,10 @@ final class GameScene: SKScene {
     // MARK: - Lifecycle
 
     override init(size: CGSize) {
+        UserDefaults.standard.register(defaults: [
+            StorageKey.soundEnabled: true,
+            StorageKey.hapticsEnabled: true
+        ])
         bestScore = UserDefaults.standard.integer(forKey: StorageKey.bestScore)
         selectedThemeID = ThemeID(
             rawValue: UserDefaults.standard.string(forKey: StorageKey.selectedTheme) ?? ""
@@ -308,6 +346,10 @@ final class GameScene: SKScene {
     }
 
     required init?(coder aDecoder: NSCoder) {
+        UserDefaults.standard.register(defaults: [
+            StorageKey.soundEnabled: true,
+            StorageKey.hapticsEnabled: true
+        ])
         bestScore = UserDefaults.standard.integer(forKey: StorageKey.bestScore)
         selectedThemeID = ThemeID(
             rawValue: UserDefaults.standard.string(forKey: StorageKey.selectedTheme) ?? ""
@@ -339,6 +381,9 @@ final class GameScene: SKScene {
         applyTheme()
         showReadyState()
         prepareHaptics()
+        if soundEnabled {
+            OrbitAudioEngine.shared.prepare()
+        }
     }
 
     override func didChangeSize(_ oldSize: CGSize) {
@@ -561,8 +606,11 @@ final class GameScene: SKScene {
         rankingSummaryLabel.fontSize = 12
         configureHUDLabel(rankingSummaryLabel)
 
-        statsSummaryLabel.fontSize = 11
+        statsSummaryLabel.fontSize = 10
         configureHUDLabel(statsSummaryLabel)
+
+        settingsSummaryLabel.fontSize = 10
+        configureHUDLabel(settingsSummaryLabel)
 
         rebuildReadyControlsLayer()
         panelLayer.isHidden = true
@@ -676,9 +724,10 @@ final class GameScene: SKScene {
         normalModeLabel.position = CGPoint(x: size.width * 0.32, y: modeY)
         dailyModeLabel.position = CGPoint(x: size.width * 0.68, y: modeY)
         rankingSummaryLabel.position = CGPoint(x: size.width * 0.50, y: rankingY)
-        missionSummaryLabel.position = CGPoint(x: size.width * 0.20, y: utilityY)
-        themesSummaryLabel.position = CGPoint(x: size.width * 0.50, y: utilityY)
-        statsSummaryLabel.position = CGPoint(x: size.width * 0.80, y: utilityY)
+        missionSummaryLabel.position = CGPoint(x: size.width * 0.14, y: utilityY)
+        themesSummaryLabel.position = CGPoint(x: size.width * 0.38, y: utilityY)
+        statsSummaryLabel.position = CGPoint(x: size.width * 0.62, y: utilityY)
+        settingsSummaryLabel.position = CGPoint(x: size.width * 0.86, y: utilityY)
 
         // instructionLabel lives in hudLayer rather than readyControlsLayer,
         // but it belongs visually to the same footer stack.
@@ -695,7 +744,8 @@ final class GameScene: SKScene {
             rankingSummaryLabel,
             missionSummaryLabel,
             themesSummaryLabel,
-            statsSummaryLabel
+            statsSummaryLabel,
+            settingsSummaryLabel
         ]
 
         for control in controls {
@@ -771,6 +821,7 @@ final class GameScene: SKScene {
             }
             consumeDailyAttempt()
             dailyGenerator = SeededGenerator(seed: dailySeed())
+            dailyFlowGenerator = SeededGenerator(seed: dailySeed() ^ 0x464C4F575F45564E)
         }
 
         worldLayer.removeAllActions()
@@ -801,6 +852,9 @@ final class GameScene: SKScene {
         switchCooldown = 0
         trailTimer = 0
         slowMotionTimer = 0
+        activeFlowEvent = .none
+        flowEventTimer = 0
+        nextFlowEventAt = gameMode == .daily ? 14 : 12
         playerAngle = -.pi / 2
         currentRadius = outerRadius
         targetRadius = outerRadius
@@ -834,6 +888,7 @@ final class GameScene: SKScene {
         updateVisualProgression()
         updateOrbitHighlight()
         updatePlayerPosition()
+        playSound(.start)
 
         instructionLabel.run(
             .sequence([
@@ -861,6 +916,7 @@ final class GameScene: SKScene {
         reportRunToGameCenter()
 
         playGameOverHaptic()
+        playSound(.gameOver)
         shakeWorld()
 
         scoreLabel.text = "\(score)"
@@ -1004,12 +1060,14 @@ final class GameScene: SKScene {
         let utilityY = missionSummaryLabel.position.y
         if abs(point.y - utilityY) < 24 {
             playSelectionHaptic()
-            if point.x < size.width * 0.36 {
+            if point.x < size.width * 0.26 {
                 openPanel(.missions)
-            } else if point.x < size.width * 0.64 {
+            } else if point.x < size.width * 0.50 {
                 openPanel(.themes)
-            } else {
+            } else if point.x < size.width * 0.74 {
                 openPanel(.stats)
+            } else {
+                openPanel(.settings)
             }
             return true
         }
@@ -1026,6 +1084,7 @@ final class GameScene: SKScene {
         targetRadius = goingInner ? innerRadius : outerRadius
 
         playImpact(intensity: 0.38)
+        playSound(.switchOrbit)
         burst(at: player.position, color: palette.player)
 
         player.removeAction(forKey: "tapPop")
@@ -1055,6 +1114,7 @@ final class GameScene: SKScene {
 
         elapsedPlayingTime += rawDT
         switchCooldown = max(0, switchCooldown - rawDT)
+        updateFlowEvent(deltaTime: rawDT)
 
         let timeScale: TimeInterval = slowMotionTimer > 0 ? 0.48 : 1.0
         slowMotionTimer = max(0, slowMotionTimer - rawDT)
@@ -1067,7 +1127,8 @@ final class GameScene: SKScene {
             ? CGFloat(elapsedPlayingTime) * 0.012 + CGFloat(spawnIndex) * 0.004
             : CGFloat(elapsedPlayingTime) * 0.018 + CGFloat(score) * 0.010
 
-        angularSpeed = min(4.15, 1.72 + progressionValue)
+        let baseAngularSpeed = min(4.15, 1.72 + progressionValue)
+        angularSpeed = baseAngularSpeed * flowSpeedMultiplier
         playerAngle = normalizedAngle(playerAngle + angularSpeed * CGFloat(dt))
 
         let interpolation = min(1, CGFloat(rawDT) * 15)
@@ -1075,12 +1136,13 @@ final class GameScene: SKScene {
 
         updatePendingSpawns(deltaTime: dt)
 
-        if spawnTimer >= nextSpawnDelay {
+        if spawnTimer >= nextSpawnDelay * flowSpawnDelayMultiplier {
             spawnTimer = 0
             spawnPattern()
         }
 
-        if trailTimer >= 0.045 {
+        let trailInterval: TimeInterval = UIAccessibility.isReduceMotionEnabled ? 0.095 : 0.045
+        if trailTimer >= trailInterval {
             trailTimer = 0
             spawnTrailDot()
         }
@@ -1136,9 +1198,35 @@ final class GameScene: SKScene {
             spawnObstacle(ringIndex: ring, lead: randomLead(), kind: .fast)
             nextSpawnDelay = randomDouble(0.74...1.02)
 
-        } else if roll < 90 && tierValue >= 18 {
+        } else if roll < 88 && tierValue >= 18 {
             spawnObstacle(ringIndex: ring, lead: randomLead(), kind: .drifting)
             nextSpawnDelay = randomDouble(0.80...1.07)
+
+        } else if roll < 92 && tierValue >= 24 {
+            spawnObstacle(ringIndex: ring, lead: randomLead(), kind: .pulse)
+            nextSpawnDelay = randomDouble(0.76...1.02)
+
+        } else if roll < 96 && tierValue >= 30 {
+            // Phase obstacles fade in quickly, rewarding early visual reading.
+            spawnObstacle(ringIndex: ring, lead: randomLead(), kind: .phase)
+            nextSpawnDelay = randomDouble(0.76...1.00)
+
+        } else if roll >= 98 && tierValue >= 36 {
+            // Three-step zig-zag. The generous spacing keeps it demanding but readable.
+            spawnObstacle(ringIndex: ring, lead: 1.52, kind: .standard)
+            pendingSpawns.append(PendingSpawn(
+                remaining: 0.38,
+                ringIndex: ring == 0 ? 1 : 0,
+                lead: 1.42,
+                kind: .fast
+            ))
+            pendingSpawns.append(PendingSpawn(
+                remaining: 0.78,
+                ringIndex: ring,
+                lead: 1.34,
+                kind: randomBool() ? .phase : .standard
+            ))
+            nextSpawnDelay = randomDouble(1.20...1.36)
 
         } else {
             // Two-step patterns always alternate rings and keep a minimum reaction window.
@@ -1199,6 +1287,19 @@ final class GameScene: SKScene {
             .fadeIn(withDuration: 0.14)
         ]))
 
+        if kind == .pulse && !UIAccessibility.isReduceMotionEnabled {
+            obstacle.node.run(
+                .repeatForever(.sequence([
+                    .fadeAlpha(to: 0.42, duration: 0.22),
+                    .fadeAlpha(to: 1.0, duration: 0.22)
+                ])),
+                withKey: "pulseObstacle"
+            )
+        } else if kind == .phase {
+            obstacle.node.alpha = UIAccessibility.isReduceMotionEnabled ? 0.9 : 0.28
+            obstacle.node.run(.fadeAlpha(to: 1.0, duration: UIAccessibility.isReduceMotionEnabled ? 0.06 : 0.42), withKey: "phaseReveal")
+        }
+
         position(obstacle, radius: ringRadius)
     }
 
@@ -1208,6 +1309,8 @@ final class GameScene: SKScene {
         case .wide: return palette.accentSoft
         case .fast: return palette.accent.withAlphaComponent(0.98)
         case .drifting: return palette.secondaryAccent
+        case .pulse: return palette.player.withAlphaComponent(0.92)
+        case .phase: return palette.secondaryAccent.withAlphaComponent(0.92)
         }
     }
 
@@ -1273,10 +1376,12 @@ final class GameScene: SKScene {
             runNearMisses += 1
             slowMotionTimer = 0.12
             playRigidImpact(intensity: 0.55)
+            playSound(.nearMiss)
             ringPulse(at: player.position)
             showFeedback("NEAR  +1", color: palette.accentSoft)
         } else {
             playSelectionHaptic()
+            playSound(.point)
         }
 
         score += gained
@@ -1290,6 +1395,7 @@ final class GameScene: SKScene {
 
         if comboMultiplier > previousMultiplier {
             comboPop()
+            playSound(.combo)
             showFeedback("×\(comboMultiplier) COMBO", color: palette.player)
         }
 
@@ -1318,6 +1424,54 @@ final class GameScene: SKScene {
         worldLayer.children
             .filter { $0.name == "transientEffect" }
             .forEach { $0.removeFromParent() }
+    }
+
+    // MARK: - Flow events
+
+    private var flowSpeedMultiplier: CGFloat {
+        switch activeFlowEvent {
+        case .none: return 1.0
+        case .surge: return 1.16
+        case .calm: return 0.84
+        }
+    }
+
+    private var flowSpawnDelayMultiplier: TimeInterval {
+        switch activeFlowEvent {
+        case .none: return 1.0
+        case .surge: return 0.90
+        case .calm: return 1.24
+        }
+    }
+
+    private func updateFlowEvent(deltaTime: TimeInterval) {
+        if activeFlowEvent != .none {
+            flowEventTimer = max(0, flowEventTimer - deltaTime)
+            if flowEventTimer <= 0 {
+                activeFlowEvent = .none
+                nextFlowEventAt = elapsedPlayingTime + flowRandomDouble(9.0...13.0)
+                showFeedback("FLUXO NORMAL", color: palette.player.withAlphaComponent(0.8))
+            }
+            return
+        }
+
+        guard elapsedPlayingTime >= nextFlowEventAt, spawnIndex >= 8 else { return }
+
+        let event: FlowEvent = flowRandomBool() ? .surge : .calm
+        activeFlowEvent = event
+        flowEventTimer = event == .surge ? 3.2 : 3.6
+        playSound(.event)
+
+        switch event {
+        case .surge:
+            showFeedback("SURGE", color: palette.accentSoft)
+            ringBurst(at: orbitCenter, color: palette.accent)
+        case .calm:
+            showFeedback("CALM", color: palette.player)
+            ringPulse(at: player.position)
+        case .none:
+            break
+        }
     }
 
     // MARK: - Ready UI
@@ -1359,12 +1513,14 @@ final class GameScene: SKScene {
         themesSummaryLabel.text = "TEMAS  \(unlockedThemeCount)/\(ThemeID.allCases.count)"
         rankingSummaryLabel.text = "RANKING"
         statsSummaryLabel.text = "STATS"
+        settingsSummaryLabel.text = "AJUSTES"
 
         let utilityColor = UIColor(white: 1, alpha: 0.52)
         missionSummaryLabel.fontColor = utilityColor
         themesSummaryLabel.fontColor = utilityColor
         rankingSummaryLabel.fontColor = palette.accentSoft.withAlphaComponent(0.95)
         statsSummaryLabel.fontColor = utilityColor
+        settingsSummaryLabel.fontColor = utilityColor
 
         if phase == .ready {
             bestLabel.text = gameMode == .daily
@@ -1380,6 +1536,8 @@ final class GameScene: SKScene {
         panelLayer.removeAllChildren()
         panelLayer.isHidden = false
         themeHitRects.removeAll()
+        soundSettingRect = .zero
+        hapticsSettingRect = .zero
 
         let dim = SKShapeNode(rectOf: size)
         dim.position = CGPoint(x: size.width / 2, y: size.height / 2)
@@ -1388,7 +1546,15 @@ final class GameScene: SKScene {
         dim.zPosition = 0
         panelLayer.addChild(dim)
 
-        let panelHeight: CGFloat = panel == .themes ? min(560, size.height - 120) : min(470, size.height - 150)
+        let panelHeight: CGFloat
+        switch panel {
+        case .themes:
+            panelHeight = min(560, size.height - 120)
+        case .settings:
+            panelHeight = min(390, size.height - 180)
+        default:
+            panelHeight = min(470, size.height - 150)
+        }
         let panelWidth = min(344, size.width - 38)
         let panelRect = CGRect(x: -panelWidth / 2, y: -panelHeight / 2, width: panelWidth, height: panelHeight)
         let card = SKShapeNode(
@@ -1413,6 +1579,8 @@ final class GameScene: SKScene {
             buildThemesPanel(center: card.position, height: panelHeight)
         case .stats:
             buildStatsPanel(center: card.position, height: panelHeight)
+        case .settings:
+            buildSettingsPanel(center: card.position, height: panelHeight)
         }
     }
 
@@ -1421,10 +1589,37 @@ final class GameScene: SKScene {
         panelLayer.removeAllChildren()
         panelLayer.isHidden = true
         themeHitRects.removeAll()
+        soundSettingRect = .zero
+        hapticsSettingRect = .zero
     }
 
     private func handlePanelTouch(at point: CGPoint) {
         guard let activePanel else { return }
+
+        if activePanel == .settings {
+            if soundSettingRect.contains(point) {
+                defaults.set(!soundEnabled, forKey: StorageKey.soundEnabled)
+                if soundEnabled {
+                    OrbitAudioEngine.shared.prepare()
+                    playSound(.event)
+                }
+                openPanel(.settings)
+                return
+            }
+
+            if hapticsSettingRect.contains(point) {
+                if hapticsEnabled {
+                    playSelectionHaptic()
+                }
+                defaults.set(!hapticsEnabled, forKey: StorageKey.hapticsEnabled)
+                if hapticsEnabled {
+                    prepareHaptics()
+                    playSelectionHaptic()
+                }
+                openPanel(.settings)
+                return
+            }
+        }
 
         if activePanel == .themes {
             for (theme, rect) in themeHitRects where rect.contains(point) {
@@ -1570,7 +1765,7 @@ final class GameScene: SKScene {
         }
 
         addPanelText(
-            "DIÁRIO HOJE  \(dailyBestScore) pts  •  \(dailyAttemptsUsed)/3 tentativas",
+            "CONQUISTAS  \(completedAchievementCount)/6  •  DIÁRIO  \(dailyBestScore) pts",
             at: CGPoint(x: center.x, y: center.y - height / 2 + 60),
             size: 11,
             color: palette.accentSoft
@@ -1580,6 +1775,64 @@ final class GameScene: SKScene {
             at: CGPoint(x: center.x, y: center.y - height / 2 + 29),
             size: 10,
             color: UIColor(white: 1, alpha: 0.52),
+            weight: "AvenirNext-DemiBold"
+        )
+    }
+
+    private func buildSettingsPanel(center: CGPoint, height: CGFloat) {
+        addPanelTitle("AJUSTES", center: center, height: height)
+
+        let soundY = center.y + 62
+        let hapticsY = center.y - 6
+
+        addPanelText(
+            "SOM",
+            at: CGPoint(x: center.x - 112, y: soundY),
+            size: 13,
+            color: UIColor(white: 1, alpha: 0.72),
+            weight: "AvenirNext-DemiBold",
+            alignment: .left
+        )
+        addPanelText(
+            soundEnabled ? "LIGADO" : "DESLIGADO",
+            at: CGPoint(x: center.x + 112, y: soundY),
+            size: 13,
+            color: soundEnabled ? palette.accentSoft : UIColor(white: 1, alpha: 0.36),
+            weight: "AvenirNext-DemiBold",
+            alignment: .right
+        )
+
+        addPanelText(
+            "HAPTICS",
+            at: CGPoint(x: center.x - 112, y: hapticsY),
+            size: 13,
+            color: UIColor(white: 1, alpha: 0.72),
+            weight: "AvenirNext-DemiBold",
+            alignment: .left
+        )
+        addPanelText(
+            hapticsEnabled ? "LIGADO" : "DESLIGADO",
+            at: CGPoint(x: center.x + 112, y: hapticsY),
+            size: 13,
+            color: hapticsEnabled ? palette.accentSoft : UIColor(white: 1, alpha: 0.36),
+            weight: "AvenirNext-DemiBold",
+            alignment: .right
+        )
+
+        soundSettingRect = CGRect(x: center.x - 150, y: soundY - 27, width: 300, height: 54)
+        hapticsSettingRect = CGRect(x: center.x - 150, y: hapticsY - 27, width: 300, height: 54)
+
+        addPanelText(
+            "Reduzir Movimento segue os Ajustes do iOS",
+            at: CGPoint(x: center.x, y: center.y - 84),
+            size: 10,
+            color: UIColor(white: 1, alpha: 0.34)
+        )
+        addPanelText(
+            "TOQUE EM UMA OPÇÃO • FORA PARA FECHAR",
+            at: CGPoint(x: center.x, y: center.y - height / 2 + 29),
+            size: 9,
+            color: UIColor(white: 1, alpha: 0.48),
             weight: "AvenirNext-DemiBold"
         )
     }
@@ -1865,6 +2118,21 @@ final class GameScene: SKScene {
         randomUnit() >= 0.5
     }
 
+    private func flowRandomUnit() -> Double {
+        if gameMode == .daily {
+            return dailyFlowGenerator.unit()
+        }
+        return Double.random(in: 0..<1)
+    }
+
+    private func flowRandomDouble(_ range: ClosedRange<Double>) -> Double {
+        range.lowerBound + (range.upperBound - range.lowerBound) * flowRandomUnit()
+    }
+
+    private func flowRandomBool() -> Bool {
+        flowRandomUnit() >= 0.5
+    }
+
     // MARK: - Visual progression and feedback
 
     private func updateVisualProgression() {
@@ -2012,7 +2280,8 @@ final class GameScene: SKScene {
     }
 
     private func explode(at position: CGPoint, color: UIColor, count: Int, power: CGFloat) {
-        for _ in 0..<count {
+        let effectiveCount = UIAccessibility.isReduceMotionEnabled ? max(4, count / 3) : count
+        for _ in 0..<effectiveCount {
             let radius = CGFloat.random(in: 1.6...4.2)
             let dot = SKShapeNode(circleOfRadius: radius)
             dot.name = "transientEffect"
@@ -2076,6 +2345,7 @@ final class GameScene: SKScene {
     }
 
     private func shakeWorld() {
+        guard !UIAccessibility.isReduceMotionEnabled else { return }
         worldLayer.removeAction(forKey: "gameOverShake")
         worldLayer.position = .zero
 
@@ -2089,9 +2359,40 @@ final class GameScene: SKScene {
         worldLayer.run(shake, withKey: "gameOverShake")
     }
 
+    // MARK: - Preferences and achievement progress
+
+    private var soundEnabled: Bool {
+        defaults.bool(forKey: StorageKey.soundEnabled)
+    }
+
+    private var hapticsEnabled: Bool {
+        defaults.bool(forKey: StorageKey.hapticsEnabled)
+    }
+
+    private var completedAchievementCount: Int {
+        let totalRuns = defaults.integer(forKey: StorageKey.totalRuns)
+        let totalNearMisses = defaults.integer(forKey: StorageKey.totalNearMisses)
+        let storedBestCombo = max(1, defaults.integer(forKey: StorageKey.bestCombo))
+
+        var count = 0
+        if bestScore >= 10 { count += 1 }
+        if bestScore >= 50 { count += 1 }
+        if bestScore >= 100 { count += 1 }
+        if totalNearMisses >= 10 { count += 1 }
+        if storedBestCombo >= 4 { count += 1 }
+        if totalRuns >= 100 { count += 1 }
+        return count
+    }
+
+    private func playSound(_ cue: OrbitAudioEngine.Cue) {
+        guard soundEnabled else { return }
+        OrbitAudioEngine.shared.play(cue)
+    }
+
     // MARK: - Haptics
 
     private func prepareHaptics() {
+        guard hapticsEnabled else { return }
 #if !targetEnvironment(simulator)
         impactGenerator.prepare()
         rigidImpactGenerator.prepare()
@@ -2101,6 +2402,7 @@ final class GameScene: SKScene {
     }
 
     private func playImpact(intensity: CGFloat) {
+        guard hapticsEnabled else { return }
 #if !targetEnvironment(simulator)
         impactGenerator.impactOccurred(intensity: intensity)
         impactGenerator.prepare()
@@ -2108,6 +2410,7 @@ final class GameScene: SKScene {
     }
 
     private func playRigidImpact(intensity: CGFloat) {
+        guard hapticsEnabled else { return }
 #if !targetEnvironment(simulator)
         rigidImpactGenerator.impactOccurred(intensity: intensity)
         rigidImpactGenerator.prepare()
@@ -2115,6 +2418,7 @@ final class GameScene: SKScene {
     }
 
     private func playGameOverHaptic() {
+        guard hapticsEnabled else { return }
 #if !targetEnvironment(simulator)
         notificationGenerator.notificationOccurred(.error)
         notificationGenerator.prepare()
@@ -2122,6 +2426,7 @@ final class GameScene: SKScene {
     }
 
     private func playSelectionHaptic() {
+        guard hapticsEnabled else { return }
 #if !targetEnvironment(simulator)
         selectionGenerator.selectionChanged()
         selectionGenerator.prepare()
