@@ -11,6 +11,8 @@ final class OrbitAudioEngine {
         case combo
         case gameOver
         case event
+        case milestone
+        case newBest
     }
 
     private let engine = AVAudioEngine()
@@ -85,6 +87,10 @@ final class OrbitAudioEngine {
             return SoundSpec(frequency: 310, duration: 0.22, volume: 0.18, harmonic: 0.16, endFrequency: 120)
         case .event:
             return SoundSpec(frequency: 620, duration: 0.11, volume: 0.12, harmonic: 0.14, endFrequency: 860)
+        case .milestone:
+            return SoundSpec(frequency: 880, duration: 0.14, volume: 0.15, harmonic: 0.20, endFrequency: 1_320)
+        case .newBest:
+            return SoundSpec(frequency: 1_020, duration: 0.18, volume: 0.17, harmonic: 0.24, endFrequency: 1_720)
         }
     }
 

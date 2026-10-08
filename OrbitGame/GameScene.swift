@@ -17,6 +17,7 @@ final class GameScene: SKScene {
         case missions
         case themes
         case stats
+        case achievements
         case settings
     }
 
@@ -274,6 +275,7 @@ final class GameScene: SKScene {
     private let missionSummaryLabel = SKLabelNode(fontNamed: "AvenirNext-Medium")
     private let themesSummaryLabel = SKLabelNode(fontNamed: "AvenirNext-Medium")
     private let rankingSummaryLabel = SKLabelNode(fontNamed: "AvenirNext-Medium")
+    private let achievementsSummaryLabel = SKLabelNode(fontNamed: "AvenirNext-Medium")
     private let statsSummaryLabel = SKLabelNode(fontNamed: "AvenirNext-Medium")
     private let settingsSummaryLabel = SKLabelNode(fontNamed: "AvenirNext-Medium")
 
@@ -299,6 +301,9 @@ final class GameScene: SKScene {
     private var runNearMisses = 0
     private var runSwitches = 0
     private var spawnIndex = 0
+    private var runStartingBestScore = 0
+    private var didShowNewBestThisRun = false
+    private var reachedMilestones = Set<Int>()
 
     private var lastUpdateTime: TimeInterval = 0
     private var spawnTimer: TimeInterval = 0
@@ -606,6 +611,9 @@ final class GameScene: SKScene {
         rankingSummaryLabel.fontSize = 12
         configureHUDLabel(rankingSummaryLabel)
 
+        achievementsSummaryLabel.fontSize = 11
+        configureHUDLabel(achievementsSummaryLabel)
+
         statsSummaryLabel.fontSize = 10
         configureHUDLabel(statsSummaryLabel)
 
@@ -723,7 +731,8 @@ final class GameScene: SKScene {
 
         normalModeLabel.position = CGPoint(x: size.width * 0.32, y: modeY)
         dailyModeLabel.position = CGPoint(x: size.width * 0.68, y: modeY)
-        rankingSummaryLabel.position = CGPoint(x: size.width * 0.50, y: rankingY)
+        rankingSummaryLabel.position = CGPoint(x: size.width * 0.34, y: rankingY)
+        achievementsSummaryLabel.position = CGPoint(x: size.width * 0.66, y: rankingY)
         missionSummaryLabel.position = CGPoint(x: size.width * 0.14, y: utilityY)
         themesSummaryLabel.position = CGPoint(x: size.width * 0.38, y: utilityY)
         statsSummaryLabel.position = CGPoint(x: size.width * 0.62, y: utilityY)
@@ -742,6 +751,7 @@ final class GameScene: SKScene {
             normalModeLabel,
             dailyModeLabel,
             rankingSummaryLabel,
+            achievementsSummaryLabel,
             missionSummaryLabel,
             themesSummaryLabel,
             statsSummaryLabel,
@@ -845,6 +855,9 @@ final class GameScene: SKScene {
         runNearMisses = 0
         runSwitches = 0
         spawnIndex = 0
+        runStartingBestScore = bestScore
+        didShowNewBestThisRun = false
+        reachedMilestones.removeAll()
         angularSpeed = 1.72
         elapsedPlayingTime = 0
         spawnTimer = 0
@@ -1053,7 +1066,11 @@ final class GameScene: SKScene {
         let rankingY = rankingSummaryLabel.position.y
         if abs(point.y - rankingY) < 25 {
             playSelectionHaptic()
-            GameCenterService.shared.showRanking()
+            if point.x < size.width / 2 {
+                GameCenterService.shared.showRanking()
+            } else {
+                openPanel(.achievements)
+            }
             return true
         }
 
@@ -1213,36 +1230,36 @@ final class GameScene: SKScene {
 
         } else if roll >= 98 && tierValue >= 36 {
             // Three-step zig-zag. The generous spacing keeps it demanding but readable.
-            spawnObstacle(ringIndex: ring, lead: 1.52, kind: .standard)
+            spawnObstacle(ringIndex: ring, lead: 1.58, kind: .standard)
             pendingSpawns.append(PendingSpawn(
-                remaining: 0.38,
+                remaining: 0.42,
                 ringIndex: ring == 0 ? 1 : 0,
-                lead: 1.42,
+                lead: 1.50,
                 kind: .fast
             ))
             pendingSpawns.append(PendingSpawn(
-                remaining: 0.78,
+                remaining: 0.86,
                 ringIndex: ring,
-                lead: 1.34,
+                lead: 1.46,
                 kind: randomBool() ? .phase : .standard
             ))
-            nextSpawnDelay = randomDouble(1.20...1.36)
+            nextSpawnDelay = randomDouble(1.26...1.42)
 
         } else {
             // Two-step patterns always alternate rings and keep a minimum reaction window.
-            spawnObstacle(ringIndex: ring, lead: 1.48, kind: .standard)
+            spawnObstacle(ringIndex: ring, lead: 1.52, kind: .standard)
             pendingSpawns.append(PendingSpawn(
-                remaining: tierValue > 35 ? 0.34 : 0.39,
+                remaining: tierValue > 35 ? 0.38 : 0.42,
                 ringIndex: ring == 0 ? 1 : 0,
-                lead: 1.38,
+                lead: 1.46,
                 kind: tierValue > 26 && randomBool() ? .fast : .standard
             ))
-            nextSpawnDelay = randomDouble(1.04...1.24)
+            nextSpawnDelay = randomDouble(1.10...1.28)
         }
     }
 
     private func randomLead() -> CGFloat {
-        randomCGFloat(1.31...2.05)
+        randomCGFloat(1.46...2.08)
     }
 
     private func updatePendingSpawns(deltaTime: TimeInterval) {
@@ -1384,9 +1401,11 @@ final class GameScene: SKScene {
             playSound(.point)
         }
 
+        let previousScore = score
         score += gained
         scoreLabel.text = "\(score)"
         scorePulse()
+        handleScoreProgress(from: previousScore, to: score)
 
         if comboMultiplier > 1 {
             comboLabel.text = "COMBO  ×\(comboMultiplier)"
@@ -1424,6 +1443,34 @@ final class GameScene: SKScene {
         worldLayer.children
             .filter { $0.name == "transientEffect" }
             .forEach { $0.removeFromParent() }
+    }
+
+    // MARK: - Score milestones
+
+    private func handleScoreProgress(from previousScore: Int, to newScore: Int) {
+        for milestone in scoreMilestones where previousScore < milestone && newScore >= milestone {
+            guard reachedMilestones.insert(milestone).inserted else { continue }
+            showFeedback("\(milestone)!", color: palette.player)
+            ringBurst(at: orbitCenter, color: palette.player)
+            playRigidImpact(intensity: milestone >= 100 ? 0.82 : 0.62)
+            playSound(.milestone)
+        }
+
+        if gameMode == .normal,
+           !didShowNewBestThisRun,
+           runStartingBestScore > 0,
+           previousScore <= runStartingBestScore,
+           newScore > runStartingBestScore {
+            didShowNewBestThisRun = true
+            showFeedback("NEW BEST", color: palette.accentSoft)
+            ringBurst(at: orbitCenter, color: palette.accentSoft)
+            playRigidImpact(intensity: 0.72)
+            playSound(.newBest)
+        }
+    }
+
+    private var scoreMilestones: [Int] {
+        [25, 50, 100, 150, 200, 300, 400, 500, 750, 1000]
     }
 
     // MARK: - Flow events
@@ -1464,10 +1511,10 @@ final class GameScene: SKScene {
 
         switch event {
         case .surge:
-            showFeedback("SURGE", color: palette.accentSoft)
+            showFeedback("SURGE  +16%", color: palette.accentSoft)
             ringBurst(at: orbitCenter, color: palette.accent)
         case .calm:
-            showFeedback("CALM", color: palette.player)
+            showFeedback("CALM  •  RESPIRO", color: palette.player)
             ringPulse(at: player.position)
         case .none:
             break
@@ -1512,6 +1559,7 @@ final class GameScene: SKScene {
         missionSummaryLabel.text = missionSummaryText
         themesSummaryLabel.text = "TEMAS  \(unlockedThemeCount)/\(ThemeID.allCases.count)"
         rankingSummaryLabel.text = "RANKING"
+        achievementsSummaryLabel.text = "CONQUISTAS  \(completedAchievementCount)/6"
         statsSummaryLabel.text = "STATS"
         settingsSummaryLabel.text = "AJUSTES"
 
@@ -1519,6 +1567,7 @@ final class GameScene: SKScene {
         missionSummaryLabel.fontColor = utilityColor
         themesSummaryLabel.fontColor = utilityColor
         rankingSummaryLabel.fontColor = palette.accentSoft.withAlphaComponent(0.95)
+        achievementsSummaryLabel.fontColor = palette.accentSoft.withAlphaComponent(0.95)
         statsSummaryLabel.fontColor = utilityColor
         settingsSummaryLabel.fontColor = utilityColor
 
@@ -1579,6 +1628,8 @@ final class GameScene: SKScene {
             buildThemesPanel(center: card.position, height: panelHeight)
         case .stats:
             buildStatsPanel(center: card.position, height: panelHeight)
+        case .achievements:
+            buildAchievementsPanel(center: card.position, height: panelHeight)
         case .settings:
             buildSettingsPanel(center: card.position, height: panelHeight)
         }
@@ -1769,6 +1820,49 @@ final class GameScene: SKScene {
             at: CGPoint(x: center.x, y: center.y - height / 2 + 60),
             size: 11,
             color: palette.accentSoft
+        )
+        addPanelText(
+            "TOQUE PARA FECHAR",
+            at: CGPoint(x: center.x, y: center.y - height / 2 + 29),
+            size: 10,
+            color: UIColor(white: 1, alpha: 0.52),
+            weight: "AvenirNext-DemiBold"
+        )
+    }
+
+    private func buildAchievementsPanel(center: CGPoint, height: CGFloat) {
+        addPanelTitle("CONQUISTAS", center: center, height: height)
+
+        let achievements = localAchievementProgress
+        var y = center.y + height / 2 - 94
+
+        for achievement in achievements {
+            let complete = achievement.current >= achievement.target
+            addPanelText(
+                complete ? "✓  \(achievement.title)" : "○  \(achievement.title)",
+                at: CGPoint(x: center.x - 122, y: y),
+                size: 12,
+                color: complete ? palette.accentSoft : .white,
+                weight: "AvenirNext-DemiBold",
+                alignment: .left
+            )
+            addPanelText(
+                complete ? "FEITO" : "\(min(achievement.current, achievement.target))/\(achievement.target)",
+                at: CGPoint(x: center.x + 122, y: y),
+                size: 11,
+                color: complete ? palette.accentSoft : UIColor(white: 1, alpha: 0.42),
+                weight: "AvenirNext-DemiBold",
+                alignment: .right
+            )
+            y -= 51
+        }
+
+        addPanelText(
+            "\(completedAchievementCount) DE 6 CONCLUÍDAS",
+            at: CGPoint(x: center.x, y: center.y - height / 2 + 58),
+            size: 11,
+            color: palette.accentSoft,
+            weight: "AvenirNext-DemiBold"
         )
         addPanelText(
             "TOQUE PARA FECHAR",
@@ -2369,19 +2463,29 @@ final class GameScene: SKScene {
         defaults.bool(forKey: StorageKey.hapticsEnabled)
     }
 
-    private var completedAchievementCount: Int {
+    private struct LocalAchievementProgress {
+        let title: String
+        let current: Int
+        let target: Int
+    }
+
+    private var localAchievementProgress: [LocalAchievementProgress] {
         let totalRuns = defaults.integer(forKey: StorageKey.totalRuns)
         let totalNearMisses = defaults.integer(forKey: StorageKey.totalNearMisses)
         let storedBestCombo = max(1, defaults.integer(forKey: StorageKey.bestCombo))
 
-        var count = 0
-        if bestScore >= 10 { count += 1 }
-        if bestScore >= 50 { count += 1 }
-        if bestScore >= 100 { count += 1 }
-        if totalNearMisses >= 10 { count += 1 }
-        if storedBestCombo >= 4 { count += 1 }
-        if totalRuns >= 100 { count += 1 }
-        return count
+        return [
+            LocalAchievementProgress(title: "FIRST ORBIT", current: bestScore, target: 10),
+            LocalAchievementProgress(title: "GETTING SERIOUS", current: bestScore, target: 50),
+            LocalAchievementProgress(title: "ORBIT MASTER", current: bestScore, target: 100),
+            LocalAchievementProgress(title: "UNTOUCHABLE", current: totalNearMisses, target: 10),
+            LocalAchievementProgress(title: "COMBO MASTER", current: storedBestCombo, target: 4),
+            LocalAchievementProgress(title: "ADDICTED", current: totalRuns, target: 100)
+        ]
+    }
+
+    private var completedAchievementCount: Int {
+        localAchievementProgress.filter { $0.current >= $0.target }.count
     }
 
     private func playSound(_ cue: OrbitAudioEngine.Cue) {
